@@ -2,7 +2,6 @@ package statlogger
 
 import (
 	"github.com/alibaba/sentinel-golang/logging"
-	"github.com/go-errors/errors"
 	"strconv"
 	"sync"
 	"time"
@@ -30,6 +29,7 @@ func NewStatLogger(loggerName string, maxBackupIndex int, intervalMillis uint64,
 		maxEntryCount:  maxEntryCount,
 		mux:            new(sync.Mutex),
 		writeChan:      make(chan *StatRollingData, logFlushQueueSize),
+		rollingChan:    make(chan int),
 		writer:         sw,
 	}
 	sl.Rolling()
@@ -40,26 +40,23 @@ func NewStatLogger(loggerName string, maxBackupIndex int, intervalMillis uint64,
 }
 
 func addLogger(sl *StatLogger) *StatLogger {
-	util.CurrentTimeMillis()
 	mux.Lock()
 	defer mux.Unlock()
 	logger, ok := statLoggers[sl.loggerName]
 	if !ok {
 		logger = sl
 		statLoggers[sl.loggerName] = logger
-		go statLogRolling(logger)
+		go util.RunWithRecover(func() {
+			for {
+				select {
+				case <-sl.rollingChan:
+					sl.writeChan <- sl.Rolling()
+					nextRolling(sl)
+				}
+			}
+		})
 	}
 	return logger
-}
-
-func statLogRolling(sl *StatLogger) {
-	defer func() {
-		if err := recover(); err != nil {
-			logging.Error(errors.Errorf("%+v", err), "unexpected panic")
-		}
-	}()
-	sl.writeChan <- sl.Rolling()
-	nextRolling(sl)
 }
 
 func nextRolling(sl *StatLogger) {
@@ -68,12 +65,12 @@ func nextRolling(sl *StatLogger) {
 	if delayMillis > 5 {
 		timer := time.NewTimer(time.Duration(delayMillis) * time.Millisecond)
 		<-timer.C
-		statLogRolling(sl)
+		sl.rollingChan <- 1
 	} else if -delayMillis > int64(sl.intervalMillis) {
 		logging.Warn("[StatLogController] unusual delay of statLogger[" + sl.loggerName + "], " +
 			"delay=" + strconv.FormatInt(-delayMillis, 10) + "ms, submit now")
-		statLogRolling(sl)
+		sl.rollingChan <- 1
 	} else {
-		statLogRolling(sl)
+		sl.rollingChan <- 1
 	}
 }

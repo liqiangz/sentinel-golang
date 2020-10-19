@@ -17,6 +17,7 @@ type StatLogger struct {
 	writeChan      chan *StatRollingData
 	writer         *StatWriter
 	mux            *sync.Mutex
+	rollingChan    chan int
 }
 
 func (s *StatLogger) Stat(count uint32, args ...string) {
