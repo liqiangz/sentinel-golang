@@ -1,6 +1,8 @@
 package statlogger
 
 import (
+	"fmt"
+	"github.com/alibaba/sentinel-golang/logging"
 	"github.com/alibaba/sentinel-golang/util"
 	"strings"
 	"sync"
@@ -12,12 +14,41 @@ type StatLogger struct {
 	intervalMillis uint64
 	maxEntryCount  int
 	data           atomic.Value
+	writeChan      chan *StatRollingData
 	writer         *StatWriter
 	mux            *sync.Mutex
 }
 
 func (s *StatLogger) Stat(count uint32, args ...string) {
 	s.data.Load().(*StatRollingData).CountAndSum(args, count)
+}
+
+func (s *StatLogger) writeTaskLoop() {
+	for {
+		select {
+		case srd := <-s.writeChan:
+			counter := srd.getCloneDataAndClear()
+			if len(counter) == 0 {
+				return
+			}
+			for key, value := range counter {
+				b := strings.Builder{}
+				_, err := fmt.Fprintf(&b, "%s|%s|%d", util.FormatTimeMillis(srd.timeSlot), key, value)
+				if err != nil {
+					logging.Warn("[StatLogController] Failed to convert StatData to string", "loggerName", srd.sl.loggerName, "err", err)
+					continue
+				}
+				err = srd.sl.writer.write(b.String())
+				if err != nil {
+					logging.Warn("[StatLogController] Failed to write StatData", "loggerName", srd.sl.loggerName, "err", err)
+					break
+				}
+			}
+			if err := srd.sl.writer.flush(); err != nil {
+				logging.Warn("[StatLogController] Failed to flush StatData", "loggerName", srd.sl.loggerName, "err", err)
+			}
+		}
+	}
 }
 
 func (s *StatLogger) Rolling() *StatRollingData {
@@ -85,7 +116,7 @@ func (s *StatRollingData) CountAndSum(args []string, count uint32) {
 				mux:               new(sync.Mutex),
 				sl:                s.sl,
 			}
-			go WriteStatLog(&clone)
+			s.sl.writeChan <- &clone
 		}
 	}
 	s.counter[key] = num + count

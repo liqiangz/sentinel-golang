@@ -1,11 +1,9 @@
 package statlogger
 
 import (
-	"fmt"
 	"github.com/alibaba/sentinel-golang/logging"
 	"github.com/go-errors/errors"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +13,10 @@ import (
 var statLoggers = make(map[string]*StatLogger)
 
 var mux = new(sync.Mutex)
+
+const (
+	logFlushQueueSize = 60
+)
 
 // NewStatLogger constructs a NewStatLogger
 func NewStatLogger(loggerName string, maxBackupIndex int, intervalMillis uint64, maxEntryCount int, maxFileSize uint64) *StatLogger {
@@ -27,9 +29,12 @@ func NewStatLogger(loggerName string, maxBackupIndex int, intervalMillis uint64,
 		intervalMillis: intervalMillis,
 		maxEntryCount:  maxEntryCount,
 		mux:            new(sync.Mutex),
+		writeChan:      make(chan *StatRollingData, logFlushQueueSize),
 		writer:         sw,
 	}
 	sl.Rolling()
+	// Schedule the log flushing task
+	go util.RunWithRecover(sl.writeTaskLoop)
 	AddLogger(sl)
 	return sl
 }
@@ -53,31 +58,8 @@ func StatLogRolling(sl *StatLogger) {
 			logging.Error(errors.Errorf("%+v", err), "unexpected panic")
 		}
 	}()
-	go WriteStatLog(sl.Rolling())
+	sl.writeChan <- sl.Rolling()
 	NextRolling(sl)
-}
-
-func WriteStatLog(srd *StatRollingData) {
-	counter := srd.getCloneDataAndClear()
-	if len(counter) == 0 {
-		return
-	}
-	for key, value := range counter {
-		b := strings.Builder{}
-		_, err := fmt.Fprintf(&b, "%s|%s|%d", util.FormatTimeMillis(srd.timeSlot), key, value)
-		if err != nil {
-			logging.Warn("[StatLogController] Failed to convert StatData to string", "loggerName", srd.sl.loggerName, "err", err)
-			continue
-		}
-		err = srd.sl.writer.write(b.String())
-		if err != nil {
-			logging.Warn("[StatLogController] Failed to write StatData", "loggerName", srd.sl.loggerName, "err", err)
-			return
-		}
-	}
-	if err := srd.sl.writer.flush(); err != nil {
-		logging.Warn("[StatLogController] Failed to flush StatData", "loggerName", srd.sl.loggerName, "err", err)
-	}
 }
 
 func NextRolling(sl *StatLogger) {
