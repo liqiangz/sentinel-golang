@@ -55,6 +55,7 @@ func addLogger(sl *StatLogger) *StatLogger {
 				}
 			}
 		})
+		nextRolling(sl)
 	}
 	return logger
 }
