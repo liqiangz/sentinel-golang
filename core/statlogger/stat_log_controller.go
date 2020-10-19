@@ -19,7 +19,7 @@ const (
 
 // NewStatLogger constructs a NewStatLogger
 func NewStatLogger(loggerName string, maxBackupIndex int, intervalMillis uint64, maxEntryCount int, maxFileSize uint64) *StatLogger {
-	sw, err := newStatWriter(loggerName, maxFileSize, maxBackupIndex)
+	sw, err := NewStatWriter(loggerName, maxFileSize, maxBackupIndex)
 	if err != nil {
 		return nil
 	}

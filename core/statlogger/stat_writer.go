@@ -2,12 +2,14 @@ package statlogger
 
 import (
 	"bufio"
+	"fmt"
 	"github.com/alibaba/sentinel-golang/core/config"
 	"github.com/alibaba/sentinel-golang/logging"
 	"github.com/alibaba/sentinel-golang/util"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -20,7 +22,7 @@ type StatWriter struct {
 	mux            *sync.Mutex
 }
 
-func newStatWriter(fileName string, maxFileSize uint64, maxBackupIndex int) (*StatWriter, error) {
+func NewStatWriter(fileName string, maxFileSize uint64, maxBackupIndex int) (*StatWriter, error) {
 	logDir := config.LogBaseDir()
 	if len(logDir) == 0 {
 		logDir = config.GetDefaultLogDir()
@@ -40,9 +42,32 @@ func newStatWriter(fileName string, maxFileSize uint64, maxBackupIndex int) (*St
 	return &sw, nil
 }
 
-func (sw *StatWriter) write(s string) error {
+func (sw *StatWriter) WriteAndFlush(srd *StatRollingData) {
 	sw.mux.Lock()
 	defer sw.mux.Unlock()
+	counter := srd.getCloneDataAndClear()
+	if len(counter) == 0 {
+		return
+	}
+	for key, value := range counter {
+		b := strings.Builder{}
+		_, err := fmt.Fprintf(&b, "%s|%s|%d", util.FormatTimeMillis(srd.timeSlot), key, value)
+		if err != nil {
+			logging.Warn("[StatLogController] Failed to convert StatData to string", "loggerName", srd.sl.loggerName, "err", err)
+			continue
+		}
+		err = srd.sl.writer.write(b.String())
+		if err != nil {
+			logging.Warn("[StatLogController] Failed to write StatData", "loggerName", srd.sl.loggerName, "err", err)
+			break
+		}
+	}
+	if err := srd.sl.writer.flush(); err != nil {
+		logging.Warn("[StatLogController] Failed to flush StatData", "loggerName", srd.sl.loggerName, "err", err)
+	}
+}
+
+func (sw *StatWriter) write(s string) error {
 	bs := []byte(s + "\n")
 	_, err := sw.writer.Write(bs)
 	if err != nil {
@@ -52,8 +77,6 @@ func (sw *StatWriter) write(s string) error {
 }
 
 func (sw *StatWriter) flush() error {
-	sw.mux.Lock()
-	defer sw.mux.Unlock()
 	if err := sw.writer.Flush(); err != nil {
 		return err
 	}
