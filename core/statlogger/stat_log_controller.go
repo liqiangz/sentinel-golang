@@ -35,11 +35,11 @@ func NewStatLogger(loggerName string, maxBackupIndex int, intervalMillis uint64,
 	sl.Rolling()
 	// Schedule the log flushing task
 	go util.RunWithRecover(sl.writeTaskLoop)
-	AddLogger(sl)
+	addLogger(sl)
 	return sl
 }
 
-func AddLogger(sl *StatLogger) *StatLogger {
+func addLogger(sl *StatLogger) *StatLogger {
 	util.CurrentTimeMillis()
 	mux.Lock()
 	defer mux.Unlock()
@@ -47,33 +47,33 @@ func AddLogger(sl *StatLogger) *StatLogger {
 	if !ok {
 		logger = sl
 		statLoggers[sl.loggerName] = logger
-		go StatLogRolling(logger)
+		go statLogRolling(logger)
 	}
 	return logger
 }
 
-func StatLogRolling(sl *StatLogger) {
+func statLogRolling(sl *StatLogger) {
 	defer func() {
 		if err := recover(); err != nil {
 			logging.Error(errors.Errorf("%+v", err), "unexpected panic")
 		}
 	}()
 	sl.writeChan <- sl.Rolling()
-	NextRolling(sl)
+	nextRolling(sl)
 }
 
-func NextRolling(sl *StatLogger) {
+func nextRolling(sl *StatLogger) {
 	rollingTimeMillis := sl.data.Load().(*StatRollingData).rollingTimeMillis
 	delayMillis := int64(rollingTimeMillis) - int64(util.CurrentTimeMillis())
 	if delayMillis > 5 {
 		timer := time.NewTimer(time.Duration(delayMillis) * time.Millisecond)
 		<-timer.C
-		StatLogRolling(sl)
+		statLogRolling(sl)
 	} else if -delayMillis > int64(sl.intervalMillis) {
 		logging.Warn("[StatLogController] unusual delay of statLogger[" + sl.loggerName + "], " +
 			"delay=" + strconv.FormatInt(-delayMillis, 10) + "ms, submit now")
-		StatLogRolling(sl)
+		statLogRolling(sl)
 	} else {
-		StatLogRolling(sl)
+		statLogRolling(sl)
 	}
 }
