@@ -26,7 +26,14 @@ func main() {
 
 	_, err = flow.LoadRules([]*flow.Rule{
 		{
-			Resource:               "some-test",
+			Resource:               "some-test22",
+			TokenCalculateStrategy: flow.Direct,
+			ControlBehavior:        flow.Reject,
+			Threshold:              10,
+			StatIntervalInMs:       1000,
+		},
+		{
+			Resource:               "some-test11",
 			TokenCalculateStrategy: flow.Direct,
 			ControlBehavior:        flow.Reject,
 			Threshold:              10,
@@ -43,8 +50,29 @@ func main() {
 	for i := 0; i < 10; i++ {
 		go func() {
 			for {
-				e, b := sentinel.Entry("some-test", sentinel.WithTrafficType(base.Inbound))
+				e, b := sentinel.Entry("some-test11", sentinel.WithTrafficType(base.Inbound))
 				if b != nil {
+					fmt.Println(util.CurrentTimeMillis(), "blocked")
+					// Blocked. We could get the block reason from the BlockError.
+					time.Sleep(time.Duration(rand.Uint64()%10) * time.Millisecond)
+				} else {
+					// Passed, wrap the logic here.
+					fmt.Println(util.CurrentTimeMillis(), "passed")
+					time.Sleep(time.Duration(rand.Uint64()%10) * time.Millisecond)
+
+					// Be sure the entry is exited finally.
+					e.Exit()
+				}
+
+			}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		go func() {
+			for {
+				e, b := sentinel.Entry("some-test22", sentinel.WithTrafficType(base.Inbound))
+				if b != nil {
+					fmt.Println(util.CurrentTimeMillis(), "blocked")
 					// Blocked. We could get the block reason from the BlockError.
 					time.Sleep(time.Duration(rand.Uint64()%10) * time.Millisecond)
 				} else {
