@@ -1,6 +1,7 @@
 package statlogger
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/alibaba/sentinel-golang/util"
@@ -47,8 +48,6 @@ func checkRolling(t *testing.T, m *MockStatWriter) {
 	} else {
 		ab = now - data.rollingTimeMillis
 	}
-	print(ab)
-	print("\n")
 	assert.True(t, ab < 100)
 }
 
@@ -56,7 +55,7 @@ func Test_Stat_Logger(t *testing.T) {
 	t.Run("Test_stat_logger", func(t *testing.T) {
 		loggerName := "test_stat_logger"
 		interval := uint64(500)
-		testLogger := NewStatLogger(loggerName, 2, interval, 2, 100)
+		testLogger := NewStatLogger(loggerName, 2, interval, 5, 1024)
 		testLogger.mux.Lock()
 		m := &MockStatWriter{
 			dataChan: make(chan *StatRollingData, 100),
@@ -89,6 +88,20 @@ func Test_Stat_Logger(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			checkRolling(t, m)
 		}
+
+		// check maxEntryCount
+		for i := 0; i < 100; i++ {
+			testLogger.Stat(1, "test1"+strconv.Itoa(i))
+		}
+		sum := 0
+		for i := 0; i < 25; i++ {
+			data4 := <-m.dataChan
+			data4.mux.Lock()
+			assert.True(t, len(data4.counter) <= 5)
+			sum += len(data4.counter)
+			data4.mux.Unlock()
+		}
+		assert.True(t, sum == 100)
 	})
 
 }
