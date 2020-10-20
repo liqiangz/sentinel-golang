@@ -1,10 +1,11 @@
 package statlogger
 
 import (
-	"github.com/alibaba/sentinel-golang/logging"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/alibaba/sentinel-golang/logging"
 
 	"github.com/alibaba/sentinel-golang/util"
 )
@@ -19,7 +20,7 @@ const (
 
 // NewStatLogger constructs a NewStatLogger
 func NewStatLogger(loggerName string, maxBackupIndex int, intervalMillis uint64, maxEntryCount int, maxFileSize uint64) *StatLogger {
-	sw, err := NewStatWriter(loggerName, maxFileSize, maxBackupIndex)
+	sw, err := NewStatFileWriter(loggerName, maxFileSize, maxBackupIndex)
 	if err != nil {
 		return nil
 	}
@@ -34,7 +35,7 @@ func NewStatLogger(loggerName string, maxBackupIndex int, intervalMillis uint64,
 	}
 	sl.Rolling()
 	// Schedule the log flushing task
-	go util.RunWithRecover(sl.writeTaskLoop)
+	go util.RunWithRecover(sl.WriteTaskLoop)
 	addLogger(sl)
 	return sl
 }
@@ -51,7 +52,7 @@ func addLogger(sl *StatLogger) *StatLogger {
 				select {
 				case <-sl.rollingChan:
 					sl.writeChan <- sl.Rolling()
-					nextRolling(sl)
+					go nextRolling(sl)
 				}
 			}
 		})

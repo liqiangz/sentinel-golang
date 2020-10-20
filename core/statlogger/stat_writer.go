@@ -3,17 +3,22 @@ package statlogger
 import (
 	"bufio"
 	"fmt"
-	"github.com/alibaba/sentinel-golang/core/config"
-	"github.com/alibaba/sentinel-golang/logging"
-	"github.com/alibaba/sentinel-golang/util"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/alibaba/sentinel-golang/core/config"
+	"github.com/alibaba/sentinel-golang/logging"
+	"github.com/alibaba/sentinel-golang/util"
 )
 
-type StatWriter struct {
+type StatWriter interface {
+	WriteAndFlush(srd *StatRollingData)
+}
+
+type StatFileWriter struct {
 	filePath       string
 	maxFileSize    uint64
 	maxBackupIndex int
@@ -22,7 +27,8 @@ type StatWriter struct {
 	mux            *sync.Mutex
 }
 
-func NewStatWriter(fileName string, maxFileSize uint64, maxBackupIndex int) (*StatWriter, error) {
+// NewStatFileWriter constructs a StatFileWriter
+func NewStatFileWriter(fileName string, maxFileSize uint64, maxBackupIndex int) (*StatFileWriter, error) {
 	logDir := config.LogBaseDir()
 	if len(logDir) == 0 {
 		logDir = config.GetDefaultLogDir()
@@ -30,7 +36,7 @@ func NewStatWriter(fileName string, maxFileSize uint64, maxBackupIndex int) (*St
 	if err := util.CreateDirIfNotExists(logDir); err != nil {
 		return nil, err
 	}
-	sw := StatWriter{
+	sw := StatFileWriter{
 		filePath:       filepath.Join(logDir, fileName),
 		maxFileSize:    maxFileSize,
 		maxBackupIndex: maxBackupIndex,
@@ -42,10 +48,11 @@ func NewStatWriter(fileName string, maxFileSize uint64, maxBackupIndex int) (*St
 	return &sw, nil
 }
 
-func (sw *StatWriter) WriteAndFlush(srd *StatRollingData) {
+// WriteAndFlush write StatRollingData to file
+func (sw *StatFileWriter) WriteAndFlush(srd *StatRollingData) {
 	sw.mux.Lock()
 	defer sw.mux.Unlock()
-	counter := srd.getCloneDataAndClear()
+	counter := srd.GetCloneDataAndClear()
 	if len(counter) == 0 {
 		return
 	}
@@ -53,21 +60,21 @@ func (sw *StatWriter) WriteAndFlush(srd *StatRollingData) {
 		b := strings.Builder{}
 		_, err := fmt.Fprintf(&b, "%s|%s|%d", util.FormatTimeMillis(srd.timeSlot), key, value)
 		if err != nil {
-			logging.Warn("[StatLogController] Failed to convert StatData to string", "loggerName", srd.sl.loggerName, "err", err)
+			logging.Warn("[StatFileWriter] Failed to convert StatData to string", "loggerName", srd.sl.loggerName, "err", err)
 			continue
 		}
-		err = srd.sl.writer.write(b.String())
+		err = sw.write(b.String())
 		if err != nil {
-			logging.Warn("[StatLogController] Failed to write StatData", "loggerName", srd.sl.loggerName, "err", err)
+			logging.Warn("[StatFileWriter] Failed to write StatData", "loggerName", srd.sl.loggerName, "err", err)
 			break
 		}
 	}
-	if err := srd.sl.writer.flush(); err != nil {
-		logging.Warn("[StatLogController] Failed to flush StatData", "loggerName", srd.sl.loggerName, "err", err)
+	if err := sw.flush(); err != nil {
+		logging.Warn("[StatFileWriter] Failed to flush StatData", "loggerName", srd.sl.loggerName, "err", err)
 	}
 }
 
-func (sw *StatWriter) write(s string) error {
+func (sw *StatFileWriter) write(s string) error {
 	bs := []byte(s + "\n")
 	_, err := sw.writer.Write(bs)
 	if err != nil {
@@ -76,17 +83,17 @@ func (sw *StatWriter) write(s string) error {
 	return nil
 }
 
-func (sw *StatWriter) flush() error {
+func (sw *StatFileWriter) flush() error {
 	if err := sw.writer.Flush(); err != nil {
 		return err
 	}
 	if err := sw.rollFileIfSizeExceeded(); err != nil {
-		logging.Warn("[StatWriter] Fail to roll file", "err", err)
+		logging.Warn("[StatFileWriter] Fail to roll file", "err", err)
 	}
 	return nil
 }
 
-func (sw *StatWriter) rollFileIfSizeExceeded() error {
+func (sw *StatFileWriter) rollFileIfSizeExceeded() error {
 	if sw.file == nil {
 		return nil
 	}
@@ -102,7 +109,7 @@ func (sw *StatWriter) rollFileIfSizeExceeded() error {
 	return nil
 }
 
-func (sw *StatWriter) setFile() error {
+func (sw *StatFileWriter) setFile() error {
 	mf, err := os.OpenFile(sw.filePath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return err
@@ -112,7 +119,7 @@ func (sw *StatWriter) setFile() error {
 	return nil
 }
 
-func (sw *StatWriter) rollOver() error {
+func (sw *StatFileWriter) rollOver() error {
 	s := sw.filePath + "." + strconv.Itoa(sw.maxBackupIndex)
 	fileExists, err := util.FileExists(s)
 	if err != nil {
@@ -159,10 +166,10 @@ func (sw *StatWriter) rollOver() error {
 	return nil
 }
 
-func (sw *StatWriter) close() {
+func (sw *StatFileWriter) close() {
 	err := sw.file.Close()
 	if err != nil {
-		logging.Warn("[StatWriter] Fail to close file", "err", err)
+		logging.Warn("[StatFileWriter] Fail to close file", "err", err)
 	}
 	sw.file = nil
 }

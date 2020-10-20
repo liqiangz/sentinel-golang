@@ -1,10 +1,11 @@
 package statlogger
 
 import (
-	"github.com/alibaba/sentinel-golang/util"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/alibaba/sentinel-golang/util"
 )
 
 type StatLogger struct {
@@ -13,16 +14,18 @@ type StatLogger struct {
 	maxEntryCount  int
 	data           atomic.Value
 	writeChan      chan *StatRollingData
-	writer         *StatWriter
+	writer         StatWriter
 	mux            *sync.Mutex
 	rollingChan    chan int
 }
 
+// Stat stats the args within the period.
 func (s *StatLogger) Stat(count uint32, args ...string) {
 	s.data.Load().(*StatRollingData).CountAndSum(args, count)
 }
 
-func (s *StatLogger) writeTaskLoop() {
+// WriteTaskLoop begins writing loop.
+func (s *StatLogger) WriteTaskLoop() {
 	for {
 		select {
 		case srd := <-s.writeChan:
@@ -31,6 +34,7 @@ func (s *StatLogger) writeTaskLoop() {
 	}
 }
 
+// Rolling Rolls StatLogger to next statistical period.
 func (s *StatLogger) Rolling() *StatRollingData {
 	s.mux.Lock()
 	defer s.mux.Unlock()
@@ -102,11 +106,10 @@ func (s *StatRollingData) CountAndSum(args []string, count uint32) {
 	s.counter[key] = num + count
 }
 
-func (s *StatRollingData) getCloneDataAndClear() map[string]uint32 {
+func (s *StatRollingData) GetCloneDataAndClear() map[string]uint32 {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-	var counter map[string]uint32
-	counter = s.counter
+	counter := s.counter
 	s.counter = make(map[string]uint32)
 	return counter
 }
